@@ -38,7 +38,6 @@ def extract_text_from_pdf(file):
 
 
 def refine_nftc_text(raw_text):
-  # 메타데이터 및 불필요 문구 제거
   text = re.sub(r"법제처\s*\d*\s*국가법령정보센터", "", raw_text)
   text = re.sub(r"페이지\s*\d+", "", text)
   text = re.sub(
@@ -52,19 +51,36 @@ def refine_nftc_text(raw_text):
   return "\n".join(lines)
 
 
-async def generate_audio(text, voice, output_path):
+# ---------------------------------------------------------
+# 스트림릿 환경에 안전한 비동기 오디오 생성 함수 (수정됨)
+# ---------------------------------------------------------
+async def generate_audio_async(text, voice, output_path):
   communicate = edge_tts.Communicate(text, voice)
   await communicate.save(output_path)
 
 
+def run_generate_audio(text, voice, output_path):
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+  if loop.is_running():
+    # 이미 실행 중인 루프가 있는 경우 처리
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
+    new_loop.run_until_complete(generate_audio_async(text, voice, output_path))
+  else:
+    loop.run_until_complete(generate_audio_async(text, voice, output_path))
+
+
 # ---------------------------------------------------------
-# 입력방식 선택 (탭으로 구분: PDF 업로드 / 대본 직접 입력)
+# 입력방식 선택 탭 (PDF 업로드 / 대본 직접 입력)
 # ---------------------------------------------------------
 tab1, tab2 = st.tabs(
     ["📄 PDF 파일 업로드", "✏️ 대본 직접 붙여넣기 (추천)"]
 )
-
-final_text_to_speech = ""
 
 with tab1:
   uploaded_file = st.file_uploader(
@@ -97,7 +113,7 @@ with tab2:
     st.session_state["script_text"] = pasted_text
 
 # ---------------------------------------------------------
-# 음성 생성 영역 (어느 입력 방식을 쓰든 대본이 있으면 생성 가능)
+# 음성 생성 영역
 # ---------------------------------------------------------
 st.divider()
 
@@ -109,17 +125,16 @@ if "script_text" in st.session_state and st.session_state["script_text"].strip()
 
   if st.button("🚀 이 대본으로 오디오 파일 생성하기", type="primary"):
     with st.spinner("🎙️ 고품질 음성 파일(MP3) 생성 중입니다..."):
-      output_mp3 = "briefing_output.mp3"
-      asyncio.run(
-          generate_audio(
-              st.session_state["script_text"], selected_voice, output_mp3
-          )
+      output_mp3 = "briefing_output.mp3`"
+      # 안전하게 수정된 런처 함수 호출
+      run_generate_audio(
+          st.session_state["script_text"], selected_voice, "briefing_output.mp3"
       )
 
       st.success("✨ 오디오 브리핑 생성 완료!")
-      st.audio(output_mp3, format="audio/mp3")
+      st.audio("briefing_output.mp3", format="audio/mp3")
 
-      with open(output_mp3, "rb") as f:
+      with open("briefing_output.mp3", "rb") as f:
         st.download_button(
             label="📥 MP3 파일 다운로드",
             data=f,
