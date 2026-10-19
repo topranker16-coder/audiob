@@ -52,7 +52,7 @@ def refine_nftc_text(raw_text):
 
 
 # ---------------------------------------------------------
-# 스트림릿 환경에 안전한 비동기 오디오 생성 함수 (수정됨)
+# edge_tts 안전 실행 함수 (이벤트 루프 충돌 원천 방지)
 # ---------------------------------------------------------
 async def generate_audio_async(text, voice, output_path):
   communicate = edge_tts.Communicate(text, voice)
@@ -60,19 +60,13 @@ async def generate_audio_async(text, voice, output_path):
 
 
 def run_generate_audio(text, voice, output_path):
+  # 새 이벤트 루프를 생성하여 완벽히 격리된 상태에서 실행
+  loop = asyncio.new_event_loop()
+  asyncio.set_event_loop(loop)
   try:
-    loop = asyncio.get_event_loop()
-  except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-  if loop.is_running():
-    # 이미 실행 중인 루프가 있는 경우 처리
-    new_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(new_loop)
-    new_loop.run_until_complete(generate_audio_async(text, voice, output_path))
-  else:
     loop.run_until_complete(generate_audio_async(text, voice, output_path))
+  finally:
+    loop.close()
 
 
 # ---------------------------------------------------------
@@ -125,16 +119,17 @@ if "script_text" in st.session_state and st.session_state["script_text"].strip()
 
   if st.button("🚀 이 대본으로 오디오 파일 생성하기", type="primary"):
     with st.spinner("🎙️ 고품질 음성 파일(MP3) 생성 중입니다..."):
-      output_mp3 = "briefing_output.mp3`"
-      # 안전하게 수정된 런처 함수 호출
+      output_mp3 = "briefing_output.mp3"
+
+      # 안전하게 격리된 실행 함수 호출
       run_generate_audio(
-          st.session_state["script_text"], selected_voice, "briefing_output.mp3"
+          st.session_state["script_text"], selected_voice, output_mp3
       )
 
       st.success("✨ 오디오 브리핑 생성 완료!")
-      st.audio("briefing_output.mp3", format="audio/mp3")
+      st.audio(output_mp3, format="audio/mp3")
 
-      with open("briefing_output.mp3", "rb") as f:
+      with open(output_mp3, "rb") as f:
         st.download_button(
             label="📥 MP3 파일 다운로드",
             data=f,
