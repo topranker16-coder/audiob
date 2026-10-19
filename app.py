@@ -52,19 +52,28 @@ def refine_nftc_text(raw_text):
 
 
 # ---------------------------------------------------------
-# edge_tts 안전 실행 함수 (이벤트 루프 충돌 원천 방지)
+# edge_tts 안전 실행 및 예외 처리 함수
 # ---------------------------------------------------------
 async def generate_audio_async(text, voice, output_path):
+  import edge_tts
+
   communicate = edge_tts.Communicate(text, voice)
   await communicate.save(output_path)
 
 
 def run_generate_audio(text, voice, output_path):
-  # 새 이벤트 루프를 생성하여 완벽히 격리된 상태에서 실행
   loop = asyncio.new_event_loop()
   asyncio.set_event_loop(loop)
   try:
     loop.run_until_complete(generate_audio_async(text, voice, output_path))
+    return True
+  except Exception as e:
+    st.error(
+        f"⚠️ 음성 파일 생성 중 오류가 발생했습니다: {e}\n\n(참고: Streamlit"
+        " Cloud 환경에서 edge-tts 이용 시 패키지 버전이나 네트워크 방화벽"
+        " 문제일 수 있습니다.)"
+    )
+    return False
   finally:
     loop.close()
 
@@ -121,21 +130,21 @@ if "script_text" in st.session_state and st.session_state["script_text"].strip()
     with st.spinner("🎙️ 고품질 음성 파일(MP3) 생성 중입니다..."):
       output_mp3 = "briefing_output.mp3"
 
-      # 안전하게 격리된 실행 함수 호출
-      run_generate_audio(
+      success = run_generate_audio(
           st.session_state["script_text"], selected_voice, output_mp3
       )
 
-      st.success("✨ 오디오 브리핑 생성 완료!")
-      st.audio(output_mp3, format="audio/mp3")
+      if success and os.path.exists(output_mp3):
+        st.success("✨ 오디오 브리핑 생성 완료!")
+        st.audio(output_mp3, format="audio/mp3")
 
-      with open(output_mp3, "rb") as f:
-        st.download_button(
-            label="📥 MP3 파일 다운로드",
-            data=f,
-            file_name="소방_핵심브리핑.mp3",
-            mime="audio/mp3",
-        )
+        with open(output_mp3, "rb") as f:
+          st.download_button(
+              label="📥 MP3 파일 다운로드",
+              data=f,
+              file_name="소방_핵심브리핑.mp3",
+              mime="audio/mp3",
+          )
 else:
   st.info(
       "💡 PDF를 업로드하여 대본을 추출하거나, [✏️ 대본 직접 붙여넣기] 탭에 대본을"
