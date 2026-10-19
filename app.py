@@ -5,12 +5,14 @@ import re
 import streamlit as st
 
 # 페이지 설정
-st.set_page_config(page_title="소방 오디오 브리퍼", page_icon="🎧", layout="centered")
+st.set_page_config(
+    page_title="소방 오디오 브리퍼", page_icon="🎧", layout="centered"
+)
 
 st.title("🎧 나만의 소방 오디오 브리퍼")
 st.markdown(
-    "수험서나 법령 PDF를 올리면, **법제처 메타데이터를 제거한 정제된 대본**을"
-    " 확인하고 오디오로 변환할 수 있습니다."
+    "PDF 파일을 올려서 대본을 추출하거나, **직접 다듬은 대본을 붙여넣어**"
+    " 오디오 브리핑 파일로 변환하세요."
 )
 
 # 사이드바 설정 (목소리 선택)
@@ -24,11 +26,6 @@ voice_option = st.sidebar.selectbox(
 )
 selected_voice = voice_option.split(" ")[0]
 
-# 파일 업로드
-uploaded_file = st.file_uploader(
-    "📂 소방 법령/요약본 PDF 파일을 업로드하세요", type=["pdf"]
-)
-
 
 def extract_text_from_pdf(file):
   text = ""
@@ -41,7 +38,7 @@ def extract_text_from_pdf(file):
 
 
 def refine_nftc_text(raw_text):
-  # 1. 법제처 머리글, 페이지 번호, 공고문 및 개정일자 메타데이터 제거
+  # 메타데이터 및 불필요 문구 제거
   text = re.sub(r"법제처\s*\d*\s*국가법령정보센터", "", raw_text)
   text = re.sub(r"페이지\s*\d+", "", text)
   text = re.sub(
@@ -51,10 +48,8 @@ def refine_nftc_text(raw_text):
   text = re.sub(r"\[시행\s*[\d\.]+\]", "", text)
   text = re.sub(r"<개정[^>]*>", "", text)
 
-  # 2. 불필요한 공백 및 빈 줄 정리 (문장 구조 유지)
   lines = [line.strip() for line in text.split("\n") if line.strip()]
-  cleaned_text = "\n".join(lines)
-  return cleaned_text
+  return "\n".join(lines)
 
 
 async def generate_audio(text, voice, output_path):
@@ -62,50 +57,77 @@ async def generate_audio(text, voice, output_path):
   await communicate.save(output_path)
 
 
-if uploaded_file is not None:
-  st.success("✅ 파일 업로드 완료!")
+# ---------------------------------------------------------
+# 입력방식 선택 (탭으로 구분: PDF 업로드 / 대본 직접 입력)
+# ---------------------------------------------------------
+tab1, tab2 = st.tabs(
+    ["📄 PDF 파일 업로드", "✏️ 대본 직접 붙여넣기 (추천)"]
+)
 
-  # 1. 텍스트 추출 및 정제 버튼
-  if st.button("🔍 PDF 텍스트 추출 및 대본 정제하기", type="primary"):
-    with st.spinner("📄 PDF 분석 및 불필요한 메타데이터 제거 중..."):
-      raw_text = extract_text_from_pdf(uploaded_file)
+final_text_to_speech = ""
 
-      if not raw_text.strip():
-        st.error(
-            "⚠️ PDF에서 텍스트를 추출할 수 없습니다. (이미지 스캔본인지"
-            " 확인해주세요)"
-        )
-      else:
-        clean_text = refine_nftc_text(raw_text)
-        # 세션 스테이트에 정제된 텍스트 저장 (화면이 바뀌어도 유지되도록)
-        st.session_state["clean_text"] = clean_text
-        st.success("✨ 대본 정제 완료! 아래에서 확인하고 복사하세요.")
+with tab1:
+  uploaded_file = st.file_uploader(
+      "📂 소방 법령/요약본 PDF 파일을 업로드하세요",
+      type=["pdf"],
+      key="pdf_uploader",
+  )
+  if uploaded_file is not None:
+    st.success("✅ PDF 업로드 완료!")
+    if st.button("🔍 PDF 텍스트 추출 및 정제", type="primary"):
+      with st.spinner("📄 PDF 분석 중..."):
+        raw_text = extract_text_from_pdf(uploaded_file)
+        if raw_text.strip():
+          clean_pdf_text = refine_nftc_text(raw_text)
+          st.session_state["script_text"] = clean_pdf_text
+          st.success("✨ 대본 추출 완료! 아래 대본 박스를 확인하세요.")
+        else:
+          st.error("⚠️ PDF에서 텍스트를 추출할 수 없습니다.")
 
-  # 정제된 텍스트가 존재하는 경우 화면에 표시 및 오디오 생성 버튼 활성화
-  if "clean_text" in st.session_state:
-    st.subheader("📝 정제된 브리핑 대본 미리보기 및 수정")
-    st.markdown(
-        "아래 텍스트 박스 내용을 **복사**해서 활용하거나, 직접 수정하여"
-        " 오디오로 만들 수 있습니다."
-    )
+with tab2:
+  st.markdown("💡 **제가 작성해 드린 요약 대본을 아래에 복사+붙여넣기 하세요!**")
+  pasted_text = st.text_area(
+      "대본 붙여넣기 상자",
+      value=st.session_state.get("script_text", ""),
+      height=300,
+      placeholder="여기에 대본을 붙여넣으세요 (Ctrl+V)...",
+      key="manual_script_input",
+  )
+  if pasted_text:
+    st.session_state["script_text"] = pasted_text
 
-    # 사용자가 직접 확인하고 복사/수정할 수 있는 텍스트 영역
-    edited_text = st.text_area(
-        "대본 편집창", st.session_state["clean_text"], height=300
-    )
+# ---------------------------------------------------------
+# 음성 생성 영역 (어느 입력 방식을 쓰든 대본이 있으면 생성 가능)
+# ---------------------------------------------------------
+st.divider()
 
-    if st.button("🚀 이 대본으로 오디오 브리핑 생성하기", type="secondary"):
-      with st.spinner("🎙️ 고품질 음성 파일 생성 중입니다..."):
-        output_mp3 = "briefing_output.mp3"
-        asyncio.run(generate_audio(edited_text, selected_voice, output_mp3))
+if "script_text" in st.session_state and st.session_state["script_text"].strip():
+  st.subheader("🎙️ 오디오 생성하기")
+  st.info(
+      f"현재 준비된 대본 길이: 약 {len(st.session_state['script_text'])}자"
+  )
 
-        st.success("✨ 오디오 브리핑 생성 완료!")
-        st.audio(output_mp3, format="audio/mp3")
-
-        with open(output_mp3, "rb") as f:
-          st.download_button(
-              label="📥 MP3 파일 다운로드",
-              data=f,
-              file_name="소방_핵심브리핑.mp3",
-              mime="audio/mp3",
+  if st.button("🚀 이 대본으로 오디오 파일 생성하기", type="primary"):
+    with st.spinner("🎙️ 고품질 음성 파일(MP3) 생성 중입니다..."):
+      output_mp3 = "briefing_output.mp3"
+      asyncio.run(
+          generate_audio(
+              st.session_state["script_text"], selected_voice, output_mp3
           )
+      )
+
+      st.success("✨ 오디오 브리핑 생성 완료!")
+      st.audio(output_mp3, format="audio/mp3")
+
+      with open(output_mp3, "rb") as f:
+        st.download_button(
+            label="📥 MP3 파일 다운로드",
+            data=f,
+            file_name="소방_핵심브리핑.mp3",
+            mime="audio/mp3",
+        )
+else:
+  st.info(
+      "💡 PDF를 업로드하여 대본을 추출하거나, [✏️ 대본 직접 붙여넣기] 탭에 대본을"
+      " 입력해 주세요."
+  )
